@@ -1,0 +1,5 @@
+.env
+node_modules
+.fingerprint-engine
+dist
+downloads

@@ -1,0 +1,26 @@
+{
+  "name": "sora-ts-app",
+  "version": "1.0.0",
+  "description": "Sora watermark remover workflow (TypeScript) using playwright-with-fingerprints, ported from Python version.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "worker": "node dist/index.js"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.48.0",
+    "node-fetch": "^3.3.2",
+    "playwright-with-fingerprints": "^2.3.4",
+    "uuid": "^11.0.0",
+    "dotenv": "^16.4.5",
+    "https-proxy-agent": "^7.0.5",
+    "form-data": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "type": "module"
+}
+
+
