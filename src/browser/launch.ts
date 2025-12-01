@@ -31,8 +31,43 @@ export async function launchBrowser(options: LaunchOptions): Promise<BrowserSess
   // Mỗi lần chạy dùng một profile tạm → fingerprint mới, không reuse profile
   const userDataDir = await mkdtemp(join(tmpdir(), 'sora-profile-'));
 
-  console.log('[browser] Requesting new fingerprint from Bablosoft with tags:', DEFAULT_TAGS);
-  const fingerprint = await plugin.fetch({ tags: DEFAULT_TAGS });
+  // Retry logic cho fetch fingerprint (vì API có thể trả về "undefined" hoặc lỗi)
+  let fingerprint: string | null = null;
+  const maxRetries = 3;
+  let retryCount = 0;
+
+  while (!fingerprint && retryCount < maxRetries) {
+    try {
+      console.log(
+        `[browser] Requesting new fingerprint from Bablosoft with tags: ${DEFAULT_TAGS.join(', ')} (attempt ${retryCount + 1}/${maxRetries})`
+      );
+      fingerprint = await plugin.fetch({ tags: DEFAULT_TAGS });
+
+      if (!fingerprint || fingerprint.trim() === '' || fingerprint === 'undefined') {
+        throw new Error('Fingerprint API trả về giá trị không hợp lệ');
+      }
+
+      console.log('[browser] Đã lấy fingerprint thành công');
+      break;
+    } catch (error: any) {
+      retryCount++;
+      const errorMsg = error?.message || String(error);
+      console.error(`[browser] Lỗi khi fetch fingerprint (attempt ${retryCount}/${maxRetries}):`, errorMsg);
+
+      if (retryCount >= maxRetries) {
+        throw new Error(`Không thể lấy fingerprint sau ${maxRetries} lần thử: ${errorMsg}`);
+      }
+
+      // Exponential backoff: 5s, 10s, 15s
+      const delay = retryCount * 5_000;
+      console.log(`[browser] Đợi ${delay / 1000}s trước khi thử lại...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  if (!fingerprint) {
+    throw new Error('Không thể lấy fingerprint từ Bablosoft API');
+  }
 
   plugin.useFingerprint(fingerprint);
 
