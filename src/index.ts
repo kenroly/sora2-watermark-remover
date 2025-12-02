@@ -73,28 +73,20 @@ async function processTaskWithBrowser(
   }
 }
 
-async function main() {
-  const MAX_RESTART_DELAY = 60_000; // 60s max delay
-  let restartDelay = 5_000; // Bắt đầu với 5s
+async function runWorkerOnce(): Promise<void> {
+  console.log('============================================================');
+  console.log('SORA-2 REMOVE WATERMARK WORKER SERVICE');
+  console.log('============================================================');
+  console.log('[worker] Service đã khởi động...');
 
-  while (true) {
-    let context: BrowserContext | null = null;
-    let page: Page | null = null;
+  const taskClient = new TaskClient();
 
-    try {
-      console.log('============================================================');
-      console.log('SORA-2 REMOVE WATERMARK WORKER SERVICE');
-      console.log('============================================================');
-      console.log('[worker] Service đã khởi động...');
-
-      const taskClient = new TaskClient();
-
-      // Load browser một lần trước
-      console.log('[worker] Đang load browser với fingerprint + proxy...');
-      const proxy = getRandomProxy();
-      let browserSession = await launchBrowser({ proxy });
-      context = browserSession.context;
-      page = browserSession.page;
+  // Load browser đầu tiên
+  console.log('[worker] Đang load browser với fingerprint + proxy...');
+  const proxy = getRandomProxy();
+  let browserSession = await launchBrowser({ proxy });
+  let context: BrowserContext | null = browserSession.context;
+  let page: Page | null = browserSession.page;
 
   // Load web và đợi 5s để trang load xong
   console.log('[worker] Browser đã sẵn sàng, đang load trang socialutils.io...');
@@ -102,15 +94,16 @@ async function main() {
     waitUntil: 'domcontentloaded',
     timeout: 60_000
   });
-      console.log('[worker] Đã load trang, đợi 5s để trang load hoàn toàn...');
-      await new Promise((resolve) => setTimeout(resolve, 5_000));
-      console.log('[worker] Bắt đầu claim task...');
+  console.log('[worker] Đã load trang, đợi 5s để trang load hoàn toàn...');
+  await new Promise((resolve) => setTimeout(resolve, 5_000));
+  console.log('[worker] Bắt đầu claim task...');
 
-      // Reset restart delay khi đã khởi động thành công
-      restartDelay = 5_000;
-
-      while (true) {
+  while (true) {
     try {
+      if (!page || !context) {
+        throw new Error('Browser context/page không tồn tại');
+      }
+
       // Claim task và xử lý với browser đã sẵn sàng
       const result = await processTaskWithBrowser(taskClient, page);
 
@@ -146,9 +139,12 @@ async function main() {
       console.log('[worker] Bắt đầu claim task...');
     } catch (error) {
       console.error('[worker] Lỗi khi xử lý task:', error);
+
       // Nếu lỗi, đóng browser và load lại
       try {
-        await context.close();
+        if (context) {
+          await context.close();
+        }
       } catch (closeError) {
         console.error('[worker] Lỗi khi đóng browser:', closeError);
       }
@@ -173,31 +169,29 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
       console.log('[worker] Bắt đầu claim task...');
     }
+  }
+}
+
+async function main() {
+  const MAX_RESTART_DELAY = 60_000; // 60s max delay
+  let restartDelay = 5_000; // Bắt đầu với 5s
+
+  while (true) {
+    try {
+      await runWorkerOnce();
+      // Nếu runOnce hoàn thành bình thường, reset delay
+      restartDelay = 5_000;
     } catch (fatalError: any) {
-      // Lỗi fatal (như fingerprint API fail, browser crash, etc.) → restart process
       const errorMsg = fatalError?.message || String(fatalError);
-      console.error('\n[worker] ❌ Lỗi fatal, sẽ tự động restart sau vài giây...');
-      console.error('[worker] Lỗi:', errorMsg);
+      console.error('\n[worker] ❌ Lỗi fatal trong worker, sẽ tự động restart...', errorMsg);
       console.error('[worker] Stack:', fatalError?.stack);
 
-      // Đóng browser nếu còn mở
-      try {
-        if (context) {
-          await context.close();
-        }
-      } catch (closeError) {
-        // Ignore
-      }
+      console.log(`[worker] Đợi ${restartDelay / 1000}s trước khi restart...`);
+      await new Promise((resolve) => setTimeout(resolve, restartDelay));
 
-    // Exponential backoff: tăng delay mỗi lần restart (max 60s)
-    console.log(`[worker] Đợi ${restartDelay / 1000}s trước khi restart...`);
-    await new Promise((resolve) => setTimeout(resolve, restartDelay));
-
-    // Tăng delay cho lần restart tiếp theo (exponential backoff)
-    restartDelay = Math.min(restartDelay * 2, MAX_RESTART_DELAY);
-
-    console.log('[worker] 🔄 Đang restart service...\n');
-    // Continue loop để restart
+      // Tăng delay cho lần restart tiếp theo (exponential backoff)
+      restartDelay = Math.min(restartDelay * 2, MAX_RESTART_DELAY);
+    }
   }
 }
 
