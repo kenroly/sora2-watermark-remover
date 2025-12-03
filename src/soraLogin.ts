@@ -3,6 +3,10 @@ import { runtimeConfig } from './config.js';
 import { chromium } from '@playwright/test';
 import { resolve } from 'node:path';
 import readline from 'node:readline';
+import { plugin } from 'playwright-with-fingerprints';
+import type { Tag } from 'playwright-with-fingerprints';
+
+const DEFAULT_TAGS: Tag[] = ['Microsoft Windows', 'Chrome'];
 
 async function main() {
   console.log('============================================================');
@@ -14,12 +18,31 @@ async function main() {
     runtimeConfig.SORA_PRO_BASE_URL ?? 'https://www.removesorawatermark.pro/en'
   );
 
-  // Mở browser mặc định, không proxy, không fingerprint (legit site)
   const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
+  let useFingerprint = false;
 
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless: false
-  });
+  // Thử load fingerprint để browser trông "hợp lệ" hơn
+  try {
+    plugin.setWorkingFolder(resolve(runtimeConfig.FINGERPRINT_WORKDIR));
+    plugin.setServiceKey(runtimeConfig.BABLOSOFT_API_KEY);
+    console.log('[sora-login] Đang lấy fingerprint từ Bablosoft...');
+    const fp = await plugin.fetch({ tags: DEFAULT_TAGS });
+    if (!fp || fp.trim() === '' || fp === 'undefined') {
+      throw new Error('Fingerprint API trả về giá trị không hợp lệ');
+    }
+    plugin.useFingerprint(fp);
+    useFingerprint = true;
+    console.log('[sora-login] Đã áp dụng fingerprint thành công');
+  } catch (err: any) {
+    console.error(
+      '[sora-login] Lỗi khi lấy fingerprint, fallback dùng browser thường:',
+      err?.message || String(err)
+    );
+  }
+
+  const context = useFingerprint
+    ? await plugin.launchPersistentContext(userDataDir, { headless: false })
+    : await chromium.launchPersistentContext(userDataDir, { headless: false });
 
   const page = context.pages()[0] ?? (await context.newPage());
   await page.goto(runtimeConfig.SORA_PRO_BASE_URL, {

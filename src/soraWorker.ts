@@ -3,14 +3,21 @@ import { runtimeConfig } from './config.js';
 import { downloadVideo } from './sora/remover.js';
 import { TaskClient } from './taskClient.js';
 import fetch from 'node-fetch';
-import { chromium } from '@playwright/test';
 import { URL } from 'node:url';
+import { plugin } from 'playwright-with-fingerprints';
+import type { Tag } from 'playwright-with-fingerprints';
+import { resolve } from 'node:path';
 
 const POLL_INTERVAL_MS = 10_000; // 10s
 
 let cachedCookieHeader: string | null = null;
 let refreshing = false;
 let refreshPromise: Promise<void> | null = null;
+const DEFAULT_TAGS: Tag[] = ['Microsoft Windows', 'Chrome'];
+
+// Cấu hình fingerprint engine một lần cho worker
+plugin.setWorkingFolder(resolve(runtimeConfig.FINGERPRINT_WORKDIR));
+plugin.setServiceKey(runtimeConfig.BABLOSOFT_API_KEY);
 
 function cookiesToHeader(cookies: { name: string; value: string }[]): string {
   return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
@@ -27,10 +34,29 @@ async function refreshCookiesFromProfile(): Promise<void> {
       '[sora-pro] Đang load cookies từ profile:',
       runtimeConfig.SORA_PRO_PROFILE_DIR
     );
-    const context = await chromium.launchPersistentContext(
-      runtimeConfig.SORA_PRO_PROFILE_DIR,
-      { headless: true }
-    );
+    const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
+
+    let context;
+    try {
+      console.log('[sora-pro] Đang lấy fingerprint cho phiên refresh cookies...');
+      const fp = await plugin.fetch({ tags: DEFAULT_TAGS });
+      if (!fp || fp.trim() === '' || fp === 'undefined') {
+        throw new Error('Fingerprint API trả về giá trị không hợp lệ');
+      }
+      plugin.useFingerprint(fp);
+      context = await plugin.launchPersistentContext(userDataDir, {
+        headless: true
+      });
+    } catch (e: any) {
+      console.error(
+        '[sora-pro] Lỗi khi dùng fingerprint, fallback sang browser thường:',
+        e?.message || String(e)
+      );
+      const { chromium } = await import('@playwright/test');
+      context = await chromium.launchPersistentContext(userDataDir, {
+        headless: true
+      });
+    }
     try {
       const page = context.pages()[0] ?? (await context.newPage());
       await page.goto(runtimeConfig.SORA_PRO_BASE_URL, {
