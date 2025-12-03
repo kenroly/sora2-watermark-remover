@@ -28,6 +28,7 @@ export async function removeWatermarkViaBrowser(
 
     console.log('[browser-flow] Đợi 5s để trang load hoàn toàn...');
     await page.waitForTimeout(5_000);
+    await page.keyboard.press('Escape').catch(() => {});
 
     // Đóng banner quảng cáo nếu xuất hiện
     const closeButton = page.locator('button[aria-label="Close modal"]');
