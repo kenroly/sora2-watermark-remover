@@ -40,9 +40,21 @@ async function main() {
     );
   }
 
-  const context = useFingerprint
-    ? await plugin.launchPersistentContext(userDataDir, { headless: false })
-    : await chromium.launchPersistentContext(userDataDir, { headless: false });
+  let context;
+  try {
+    if (useFingerprint) {
+      console.log('[sora-login] Đang mở browser với fingerprint...');
+      context = await plugin.launchPersistentContext(userDataDir, { headless: false });
+    } else {
+      throw new Error('Không có fingerprint hợp lệ');
+    }
+  } catch (e: any) {
+    console.error(
+      '[sora-login] Lỗi khi launch browser với fingerprint, fallback sang browser thường:',
+      e?.message || String(e)
+    );
+    context = await chromium.launchPersistentContext(userDataDir, { headless: false });
+  }
 
   const page = context.pages()[0] ?? (await context.newPage());
   await page.goto(runtimeConfig.SORA_PRO_BASE_URL, {
