@@ -98,6 +98,8 @@ async function runWorkerOnce(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 5_000));
   console.log('[worker] Bắt đầu claim task...');
 
+  let sessionTaskCount = 0;
+
   while (true) {
     try {
       if (!page || !context) {
@@ -114,29 +116,40 @@ async function runWorkerOnce(): Promise<void> {
         continue;
       }
 
-      // Đã xử lý xong task (thành công hoặc thất bại) → đóng browser và load browser mới
-      console.log('[worker] Đã xử lý xong task, đóng browser và chuẩn bị load browser mới...');
-      await context.close();
+      // Đã xử lý xong task (thành công hoặc thất bại)
+      sessionTaskCount += 1;
+      console.log('[worker] Đã xử lý xong task, số task trong session hiện tại:', sessionTaskCount);
 
-      // Đợi một chút trước khi load browser mới
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      if (sessionTaskCount >= 2) {
+        // Đủ 2 task cho 1 browser session → đóng browser và load browser mới
+        console.log(
+          '[worker] Đã xử lý đủ 2 task cho browser hiện tại, đóng browser và chuẩn bị load browser mới...'
+        );
+        await context.close();
 
-      // Load browser mới cho task tiếp theo
-      console.log('[worker] Đang load browser mới với fingerprint + proxy...');
-      const newProxy = getRandomProxy();
-      browserSession = await launchBrowser({ proxy: newProxy });
-      context = browserSession.context;
-      page = browserSession.page;
+        // Đợi một chút trước khi load browser mới
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
 
-      // Load web và đợi 5s để trang load xong
-      console.log('[worker] Browser mới đã sẵn sàng, đang load trang socialutils.io...');
-      await page.goto(runtimeConfig.SOCIALUTILS_URL, {
-        waitUntil: 'domcontentloaded',
-        timeout: 60_000
-      });
-      console.log('[worker] Đã load trang, đợi 5s để trang load hoàn toàn...');
-      await new Promise((resolve) => setTimeout(resolve, 5_000));
-      console.log('[worker] Bắt đầu claim task...');
+        // Load browser mới cho task tiếp theo
+        console.log('[worker] Đang load browser mới với fingerprint + proxy...');
+        const newProxy = getRandomProxy();
+        browserSession = await launchBrowser({ proxy: newProxy });
+        context = browserSession.context;
+        page = browserSession.page;
+
+        // Load web và đợi 5s để trang load xong
+        console.log('[worker] Browser mới đã sẵn sàng, đang load trang socialutils.io...');
+        await page.goto(runtimeConfig.SOCIALUTILS_URL, {
+          waitUntil: 'domcontentloaded',
+          timeout: 60_000
+        });
+        console.log('[worker] Đã load trang, đợi 5s để trang load hoàn toàn...');
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        console.log('[worker] Bắt đầu claim task...');
+
+        // Reset counter cho session mới
+        sessionTaskCount = 0;
+      }
     } catch (error) {
       console.error('[worker] Lỗi khi xử lý task:', error);
 
