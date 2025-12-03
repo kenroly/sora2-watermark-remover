@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { runtimeConfig } from './config.js';
-import { chromium } from '@playwright/test';
 import { resolve } from 'node:path';
 import readline from 'node:readline';
+import { promises as fs } from 'node:fs';
 import { plugin } from 'playwright-with-fingerprints';
 import type { Tag } from 'playwright-with-fingerprints';
 
@@ -12,16 +12,16 @@ async function main() {
   console.log('============================================================');
   console.log('SORA PRO PREMIUM LOGIN HELPER');
   console.log('============================================================');
-  console.log('[sora-login] Profile dir:', runtimeConfig.SORA_PRO_PROFILE_DIR);
+  console.log('[sora-login] Cookie file:', runtimeConfig.SORA_PRO_COOKIE_FILE);
   console.log(
     '[sora-login] Trang login:',
     runtimeConfig.SORA_PRO_BASE_URL ?? 'https://www.removesorawatermark.pro/en'
   );
 
-  const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
-  let useFingerprint = false;
+  let browser: any = null;
+  let page: any = null;
 
-  // Thử load fingerprint để browser trông "hợp lệ" hơn
+  // Thử load fingerprint để browser trông "hợp lệ" hơn (không dùng persistent profile để tránh lỗi quota)
   try {
     plugin.setWorkingFolder(resolve(runtimeConfig.FINGERPRINT_WORKDIR));
     plugin.setServiceKey(runtimeConfig.BABLOSOFT_API_KEY);
@@ -31,32 +31,24 @@ async function main() {
       throw new Error('Fingerprint API trả về giá trị không hợp lệ');
     }
     plugin.useFingerprint(fp);
-    useFingerprint = true;
     console.log('[sora-login] Đã áp dụng fingerprint thành công');
+
+    console.log('[sora-login] Đang mở browser với fingerprint (không persistent)...');
+    browser = await plugin.launch({ headless: false });
+    page = await browser.newPage();
   } catch (err: any) {
     console.error(
-      '[sora-login] Lỗi khi lấy fingerprint, fallback dùng browser thường:',
+      '[sora-login] Lỗi khi dùng fingerprint, không thể mở browser fingerprinted:',
       err?.message || String(err)
     );
   }
 
-  let context;
-  try {
-    if (useFingerprint) {
-      console.log('[sora-login] Đang mở browser với fingerprint...');
-      context = await plugin.launchPersistentContext(userDataDir, { headless: false });
-    } else {
-      throw new Error('Không có fingerprint hợp lệ');
-    }
-  } catch (e: any) {
-    console.error(
-      '[sora-login] Lỗi khi launch browser với fingerprint, fallback sang browser thường:',
-      e?.message || String(e)
+  if (!browser || !page) {
+    throw new Error(
+      'Không thể mở browser với fingerprint. Vui lòng kiểm tra lại cấu hình Bablosoft.'
     );
-    context = await chromium.launchPersistentContext(userDataDir, { headless: false });
   }
 
-  const page = context.pages()[0] ?? (await context.newPage());
   await page.goto(runtimeConfig.SORA_PRO_BASE_URL, {
     waitUntil: 'domcontentloaded',
     timeout: 60_000
@@ -76,8 +68,16 @@ async function main() {
     });
   });
 
-  console.log('[sora-login] Đang đóng browser và lưu profile...');
-  await context.close();
+  console.log('[sora-login] Đang đọc cookies và lưu ra file...');
+  const origin = new URL(runtimeConfig.SORA_PRO_BASE_URL).origin;
+  const context = page.context();
+  const cookies = await context.cookies(origin);
+  const cookieFile = resolve(runtimeConfig.SORA_PRO_COOKIE_FILE);
+  await fs.writeFile(cookieFile, JSON.stringify(cookies, null, 2), 'utf8');
+  console.log('[sora-login] Đã lưu cookies vào', cookieFile);
+
+  console.log('[sora-login] Đang đóng browser...');
+  await browser.close();
   console.log('[sora-login] Hoàn tất. Bạn có thể chạy: npm run sora');
 }
 

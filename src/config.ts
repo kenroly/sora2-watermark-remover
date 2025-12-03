@@ -15,6 +15,7 @@ export interface RuntimeConfig {
   SORA_PRO_BASE_URL: string;
   SORA_PRO_API_URL: string;
   SORA_PRO_PROFILE_DIR: string;
+  SORA_PRO_COOKIE_FILE: string;
   SORA_PRO_CONCURRENCY: number;
   OUTPUT_DIR: string;
   SKIP_GET_COOKIES: boolean;
@@ -45,6 +46,7 @@ export const runtimeConfig: RuntimeConfig = {
     process.env.SORA_PRO_API_URL ??
     'https://www.removesorawatermark.pro/api/jobs/post-url',
   SORA_PRO_PROFILE_DIR: process.env.SORA_PRO_PROFILE_DIR ?? '.sora-pro-profile',
+  SORA_PRO_COOKIE_FILE: process.env.SORA_PRO_COOKIE_FILE ?? '.sora-pro-cookies.json',
   SORA_PRO_CONCURRENCY: Number(process.env.SORA_PRO_CONCURRENCY ?? '3') || 3,
   OUTPUT_DIR: process.env.OUTPUT_DIR ?? 'downloads',
   SKIP_GET_COOKIES: toBool(process.env.SKIP_GET_COOKIES, false),

@@ -4,78 +4,42 @@ import { downloadVideo } from './sora/remover.js';
 import { TaskClient } from './taskClient.js';
 import fetch from 'node-fetch';
 import { URL } from 'node:url';
-import { plugin } from 'playwright-with-fingerprints';
-import type { Tag } from 'playwright-with-fingerprints';
 import { resolve } from 'node:path';
+import { promises as fs } from 'node:fs';
 
 const POLL_INTERVAL_MS = 10_000; // 10s
 
 let cachedCookieHeader: string | null = null;
 let refreshing = false;
 let refreshPromise: Promise<void> | null = null;
-const DEFAULT_TAGS: Tag[] = ['Microsoft Windows', 'Chrome'];
-
-// Cấu hình fingerprint engine một lần cho worker
-plugin.setWorkingFolder(resolve(runtimeConfig.FINGERPRINT_WORKDIR));
-plugin.setServiceKey(runtimeConfig.BABLOSOFT_API_KEY);
 
 function cookiesToHeader(cookies: { name: string; value: string }[]): string {
   return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 }
 
-async function refreshCookiesFromProfile(): Promise<void> {
+async function refreshCookiesFromFile(): Promise<void> {
   if (refreshing && refreshPromise) {
     return refreshPromise;
   }
 
   refreshing = true;
   refreshPromise = (async () => {
-    console.log(
-      '[sora-pro] Đang load cookies từ profile:',
-      runtimeConfig.SORA_PRO_PROFILE_DIR
-    );
-    const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
-
-    let context;
     try {
-      console.log('[sora-pro] Đang lấy fingerprint cho phiên refresh cookies...');
-      const fp = await plugin.fetch({ tags: DEFAULT_TAGS });
-      if (!fp || fp.trim() === '' || fp === 'undefined') {
-        throw new Error('Fingerprint API trả về giá trị không hợp lệ');
-      }
-      plugin.useFingerprint(fp);
-      context = await plugin.launchPersistentContext(userDataDir, {
-        headless: true
-      });
-    } catch (e: any) {
-      console.error(
-        '[sora-pro] Lỗi khi dùng fingerprint, fallback sang browser thường:',
-        e?.message || String(e)
+      console.log(
+        '[sora-pro] Đang load cookies từ file:',
+        runtimeConfig.SORA_PRO_COOKIE_FILE
       );
-      const { chromium } = await import('@playwright/test');
-      context = await chromium.launchPersistentContext(userDataDir, {
-        headless: true
-      });
-    }
-    try {
-      const page = context.pages()[0] ?? (await context.newPage());
-      await page.goto(runtimeConfig.SORA_PRO_BASE_URL, {
-        waitUntil: 'domcontentloaded',
-        timeout: 60_000
-      });
-
-      const cookies = await context.cookies(
-        new URL(runtimeConfig.SORA_PRO_BASE_URL).origin
-      );
-      if (!cookies.length) {
+      const cookieFile = resolve(runtimeConfig.SORA_PRO_COOKIE_FILE);
+      const raw = await fs.readFile(cookieFile, 'utf8');
+      const cookies = JSON.parse(raw) as { name: string; value: string }[];
+      if (!Array.isArray(cookies) || !cookies.length) {
         throw new Error(
-          'Không tìm thấy cookie nào cho removesorawatermark.pro. Hãy chạy `npm run sora-login` trước.'
+          'File cookie rỗng hoặc không hợp lệ. Hãy chạy lại `npm run sora-login`.'
         );
       }
       cachedCookieHeader = cookiesToHeader(cookies);
-      console.log('[sora-pro] Đã load cookies thành công');
+      console.log('[sora-pro] Đã load cookies từ file thành công');
     } finally {
-      await context.close();
       refreshing = false;
       refreshPromise = null;
     }
@@ -86,7 +50,7 @@ async function refreshCookiesFromProfile(): Promise<void> {
 
 async function getCookieHeader(): Promise<string> {
   if (cachedCookieHeader) return cachedCookieHeader;
-  await refreshCookiesFromProfile();
+  await refreshCookiesFromFile();
   if (!cachedCookieHeader) {
     throw new Error(
       'Không thể load cookies cho removesorawatermark.pro. Vui lòng chạy lại `npm run sora-login`.'
