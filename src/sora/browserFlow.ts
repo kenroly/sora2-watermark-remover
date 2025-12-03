@@ -29,6 +29,14 @@ export async function removeWatermarkViaBrowser(
     console.log('[browser-flow] Đợi 5s để trang load hoàn toàn...');
     await page.waitForTimeout(5_000);
 
+    // Đóng banner quảng cáo nếu xuất hiện
+    const closeButton = page.locator('button[aria-label="Close modal"]');
+    if (await closeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      console.log('[browser-flow] Phát hiện banner quảng cáo, đang đóng...');
+      await closeButton.click({ timeout: 5_000 });
+      await page.waitForTimeout(500);
+    }
+
     const input = page.locator('#share-link');
     console.log('[browser-flow] Đang click vào input #share-link...');
     await input.click({ timeout: 15_000 });
