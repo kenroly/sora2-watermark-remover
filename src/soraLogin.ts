@@ -9,7 +9,6 @@ import type { Tag } from 'playwright-with-fingerprints';
 const DEFAULT_TAGS: Tag[] = ['Microsoft Windows', 'Chrome'];
 
 async function main() {
-  const useProfile = process.argv.includes('--profile') || process.argv.includes('--reuse-profile');
   console.log('============================================================');
   console.log('SORA PRO PREMIUM LOGIN HELPER');
   console.log('============================================================');
@@ -18,14 +17,13 @@ async function main() {
     '[sora-login] Trang login:',
     runtimeConfig.SORA_PRO_BASE_URL ?? 'https://www.removesorawatermark.pro/en'
   );
-
-  console.log('[sora-login] Chế độ:', useProfile ? 'Dùng persistent profile (load & lưu lại)' : 'Dùng profile tạm (chỉ lưu cookies file)');
+  console.log('[sora-login] Chế độ: Dùng persistent profile (luôn lưu & tái sử dụng)');
 
   let browserOrContext: any = null;
   let context: any = null;
   let page: any = null;
 
-  // Chuẩn bị fingerprint để browser trông "hợp lệ" hơn
+  // Chuẩn bị fingerprint để browser trông "hợp lệ" hơn và gắn vào profile lưu lại
   try {
     plugin.setWorkingFolder(resolve(runtimeConfig.FINGERPRINT_WORKDIR));
     plugin.setServiceKey(runtimeConfig.BABLOSOFT_API_KEY);
@@ -35,40 +33,33 @@ async function main() {
       throw new Error('Fingerprint API trả về giá trị không hợp lệ');
     }
     plugin.useFingerprint(fp);
-    console.log('[sora-login] Đã áp dụng fingerprint thành công');
+    console.log('[sora-login] Đã áp dụng fingerprint thành công (sẽ lưu cùng profile)');
   } catch (err: any) {
     console.error(
-      '[sora-login] Lỗi khi dùng fingerprint, không thể mở browser fingerprinted:',
+      '[sora-login] Lỗi khi dùng fingerprint, sẽ thử mở persistent profile với Playwright thường:',
       err?.message || String(err)
     );
   }
 
-  if (useProfile) {
-    try {
-      console.log(
-        '[sora-login] Đang mở browser fingerprint + persistent profile...',
-        runtimeConfig.SORA_PRO_PROFILE_DIR
-      );
-      const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
-      context = await plugin.launchPersistentContext(userDataDir, { headless: false });
-      page = context.pages()[0] ?? (await context.newPage());
-      browserOrContext = context;
-    } catch (err: any) {
-      console.error(
-        '[sora-login] Lỗi khi launch persistent (fingerprint), thử lại với browser thường:',
-        err?.message || String(err)
-      );
-      const { chromium } = await import('@playwright/test');
-      const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
-      context = await chromium.launchPersistentContext(userDataDir, { headless: false });
-      page = context.pages()[0] ?? (await context.newPage());
-      browserOrContext = context;
-    }
-  } else {
-    console.log('[sora-login] Đang mở browser fingerprint (profile tạm, không lưu)...');
-    browserOrContext = await plugin.launch({ headless: false });
-    page = await browserOrContext.newPage();
-    context = page.context();
+  try {
+    console.log(
+      '[sora-login] Đang mở browser fingerprint + persistent profile...',
+      runtimeConfig.SORA_PRO_PROFILE_DIR
+    );
+    const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
+    context = await plugin.launchPersistentContext(userDataDir, { headless: false });
+    page = context.pages()[0] ?? (await context.newPage());
+    browserOrContext = context;
+  } catch (err: any) {
+    console.error(
+      '[sora-login] Lỗi khi launch persistent (fingerprint), fallback sang Playwright thường:',
+      err?.message || String(err)
+    );
+    const { chromium } = await import('@playwright/test');
+    const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
+    context = await chromium.launchPersistentContext(userDataDir, { headless: false });
+    page = context.pages()[0] ?? (await context.newPage());
+    browserOrContext = context;
   }
 
   if (!browserOrContext || !page || !context) {
