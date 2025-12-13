@@ -4,6 +4,7 @@
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
 import type { BrowserContext, Page } from '@playwright/test';
 import { plugin } from 'playwright-with-fingerprints';
 import type { Tag } from 'playwright-with-fingerprints';
@@ -59,67 +60,84 @@ function markComboUsed(dateKey: string, comboKey: string): void {
 
 export async function launchBrowser(options: LaunchOptions): Promise<BrowserSession> {
   const artifactsDir = await mkdtemp(join(tmpdir(), 'sora-artifacts-'));
-  // Mỗi lần chạy dùng một profile tạm → fingerprint mới, không reuse profile
-  const userDataDir = await mkdtemp(join(tmpdir(), 'sora-profile-'));
+  // Sử dụng persistent profile để giữ login session
+  const userDataDir = resolve(runtimeConfig.SORA_PRO_PROFILE_DIR);
+  await mkdir(userDataDir, { recursive: true });
+  console.log('[browser] Sử dụng persistent profile:', userDataDir);
+  
+  // Kiểm tra xem profile đã tồn tại chưa (có login session)
+  const profileExists = existsSync(userDataDir) && readdirSync(userDataDir).length > 0;
+  if (profileExists) {
+    console.log('[browser] Profile đã tồn tại, sẽ sử dụng fingerprint đã lưu trong profile');
+  } else {
+    console.log('[browser] Profile mới, sẽ tạo fingerprint mới');
+  }
+  
   const todayKey = getTodayKey();
   const proxyKey = getProxyKey(options.proxy);
   cleanupOldDateEntries(todayKey);
 
-  // Retry logic cho fetch fingerprint (vì API có thể trả về "undefined" hoặc lỗi)
+  // Chỉ fetch fingerprint mới nếu profile chưa tồn tại
+  // Nếu profile đã tồn tại, fingerprint đã được lưu trong profile từ lần login
   let fingerprint: string | null = null;
-  const maxRetries = 3;
-  let retryCount = 0;
-  let duplicateComboCount = 0;
+  if (!profileExists) {
+    const maxRetries = 3;
+    let retryCount = 0;
+    let duplicateComboCount = 0;
 
-  while (!fingerprint && retryCount < maxRetries) {
-    try {
-      console.log(
-        `[browser] Requesting new fingerprint from Bablosoft with tags: ${DEFAULT_TAGS.join(', ')} (attempt ${retryCount + 1}/${maxRetries})`
-      );
-      let fetchedFingerprint = await plugin.fetch({ tags: DEFAULT_TAGS });
-
-      if (!fetchedFingerprint || fetchedFingerprint.trim() === '' || fetchedFingerprint === 'undefined') {
-        throw new Error('Fingerprint API trả về giá trị không hợp lệ');
-      }
-
-      const comboKey = `${proxyKey}|${fetchedFingerprint}`;
-      if (hasUsedCombo(todayKey, comboKey)) {
-        duplicateComboCount += 1;
-        console.warn(
-          `[browser] Fingerprint + proxy combo đã được dùng hôm nay (combo ${duplicateComboCount}/${MAX_COMBO_DUPLICATE_RETRIES}). Đang yêu cầu fingerprint khác...`
+    while (!fingerprint && retryCount < maxRetries) {
+      try {
+        console.log(
+          `[browser] Requesting new fingerprint from Bablosoft with tags: ${DEFAULT_TAGS.join(', ')} (attempt ${retryCount + 1}/${maxRetries})`
         );
-        if (duplicateComboCount >= MAX_COMBO_DUPLICATE_RETRIES) {
-          throw new Error('Không thể tìm fingerprint mới chưa dùng cùng proxy trong ngày hôm nay');
+        let fetchedFingerprint = await plugin.fetch({ tags: DEFAULT_TAGS });
+
+        if (!fetchedFingerprint || fetchedFingerprint.trim() === '' || fetchedFingerprint === 'undefined') {
+          throw new Error('Fingerprint API trả về giá trị không hợp lệ');
         }
-        await new Promise((resolve) => setTimeout(resolve, 2_000));
-        continue;
+
+        const comboKey = `${proxyKey}|${fetchedFingerprint}`;
+        if (hasUsedCombo(todayKey, comboKey)) {
+          duplicateComboCount += 1;
+          console.warn(
+            `[browser] Fingerprint + proxy combo đã được dùng hôm nay (combo ${duplicateComboCount}/${MAX_COMBO_DUPLICATE_RETRIES}). Đang yêu cầu fingerprint khác...`
+          );
+          if (duplicateComboCount >= MAX_COMBO_DUPLICATE_RETRIES) {
+            throw new Error('Không thể tìm fingerprint mới chưa dùng cùng proxy trong ngày hôm nay');
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+          continue;
+        }
+
+        fingerprint = fetchedFingerprint;
+        markComboUsed(todayKey, comboKey);
+        console.log('[browser] Đã lấy fingerprint thành công và đánh dấu combo fingerprint+proxy cho ngày hôm nay');
+        break;
+      } catch (error: any) {
+        retryCount++;
+        const errorMsg = error?.message || String(error);
+        console.error(`[browser] Lỗi khi fetch fingerprint (attempt ${retryCount}/${maxRetries}):`, errorMsg);
+
+        if (retryCount >= maxRetries) {
+          throw new Error(`Không thể lấy fingerprint sau ${maxRetries} lần thử: ${errorMsg}`);
+        }
+
+        // Exponential backoff: 5s, 10s, 15s
+        const delay = retryCount * 5_000;
+        console.log(`[browser] Đợi ${delay / 1000}s trước khi thử lại...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-
-      fingerprint = fetchedFingerprint;
-      markComboUsed(todayKey, comboKey);
-      console.log('[browser] Đã lấy fingerprint thành công và đánh dấu combo fingerprint+proxy cho ngày hôm nay');
-      break;
-    } catch (error: any) {
-      retryCount++;
-      const errorMsg = error?.message || String(error);
-      console.error(`[browser] Lỗi khi fetch fingerprint (attempt ${retryCount}/${maxRetries}):`, errorMsg);
-
-      if (retryCount >= maxRetries) {
-        throw new Error(`Không thể lấy fingerprint sau ${maxRetries} lần thử: ${errorMsg}`);
-      }
-
-      // Exponential backoff: 5s, 10s, 15s
-      const delay = retryCount * 5_000;
-      console.log(`[browser] Đợi ${delay / 1000}s trước khi thử lại...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
     }
-  }
 
-  if (!fingerprint) {
-    throw new Error('Không thể lấy fingerprint từ Bablosoft API');
-  }
+    if (!fingerprint) {
+      throw new Error('Không thể lấy fingerprint từ Bablosoft API');
+    }
 
-  plugin.useFingerprint(fingerprint);
+    plugin.useFingerprint(fingerprint);
+  } else {
+    // Profile đã tồn tại, fingerprint sẽ được load từ profile tự động
+    console.log('[browser] Sử dụng fingerprint đã lưu trong profile');
+  }
 
   if (options.proxy && options.proxy.trim()) {
     console.log('[browser] Using proxy:', options.proxy);
